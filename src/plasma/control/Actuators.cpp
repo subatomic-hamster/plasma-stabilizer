@@ -12,10 +12,11 @@ void ActuatorBank::configure(const ActuatorLimits& limits)
     channels[static_cast<std::size_t>(ActuatorChannel::CurrentDrivePower)]
         .configure(0.0, limits.maximumDrivenFraction, limits.powerSlewRate * limits.maximumDrivenFraction, 0.0);
 
-    // Steering starts mid-plasma: a gyrotron mirror has to be somewhere, and
+    // Steering starts mid-range: a gyrotron mirror has to be somewhere, and
     // starting it on the rational surface would hand the policy the answer.
     channels[static_cast<std::size_t>(ActuatorChannel::CurrentDriveRadius)]
-        .configure(0.05, 0.95, limits.steeringSlewRate, 0.5);
+        .configure(limits.minimumDepositionRadius, limits.maximumDepositionRadius,
+                   limits.steeringSlewRate, limits.minimumDepositionRadius);
 
     channels[static_cast<std::size_t>(ActuatorChannel::BeamPower)]
         .configure(limits.minimumBeamPower, limits.maximumBeamPower,

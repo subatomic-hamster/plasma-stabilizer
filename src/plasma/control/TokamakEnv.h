@@ -40,8 +40,22 @@ struct RewardWeights
     Real chatter{ 0.35 };
     Real saturation{ 0.15 };
     Real survival{ 0.20 };
-    /// One-off penalty when the discharge disrupts.
-    Real disruption{ 30.0 };
+
+    /// Disruption penalty, charged *per control step the discharge failed to
+    /// survive to complete*.
+    ///
+    /// A flat one-off penalty is wrong here, in a way that is easy to miss.
+    /// Once an episode's per-step reward goes negative -- which it does as soon
+    /// as an island is large -- ending the episode early stops the losses, so a
+    /// flat penalty smaller than the remaining negative reward makes disrupting
+    /// the *optimal* move. Training found exactly that: the policy pushed the
+    /// beam up for confinement, let the island run away, and disrupted at a
+    /// third of the pulse length on purpose, because that beat surviving.
+    ///
+    /// Scaling by the steps remaining makes a disruption cost what it destroys,
+    /// so surviving badly always beats not surviving. The value is set above the
+    /// worst sustainable per-step loss for that reason.
+    Real disruption{ 3.5 };
 };
 
 /// Per-step breakdown, kept so training curves can show which objective a
@@ -82,7 +96,18 @@ struct TokamakEnvConfig
     Real alfvenTimeSeconds{ 3.8e-4 };
 
     /// Island width, as a fraction of the minor radius, that ends the discharge.
-    Real disruptionIslandWidth{ 0.35 };
+    ///
+    /// Set above the width an uncontrolled discharge reaches (~0.48 here) so
+    /// that losing the plasma is a genuine failure rather than the default
+    /// outcome. With the threshold below that, every episode terminated and the
+    /// reward became a cliff: identical returns either side of a discontinuity,
+    /// no gradient for a policy-gradient method to follow, and learning stalled
+    /// completely. The tearing penalty carries the signal smoothly instead.
+    Real disruptionIslandWidth{ 0.46 };
+    /// Island width used to normalize the tearing penalty. Kept at the old
+    /// disruption threshold so the penalty still saturates where a real machine
+    /// would already be in trouble.
+    Real tearingPenaltyScale{ 0.35 };
 
     // --- Domain randomization ----------------------------------------------
     // Each episode draws a slightly different machine. A policy that only works
@@ -123,6 +148,13 @@ public:
 
     [[nodiscard]] std::size_t observationSize() const;
     [[nodiscard]] static constexpr std::size_t actionSize() { return kActuatorCount; }
+
+    /// Observation size for the default diagnostic configuration, available at
+    /// compile time. RLTools dispatches statically and needs the dimension as a
+    /// constant; configure() asserts that the runtime size agrees.
+    ///   8 Mirnov coils x 2 frequency bands + 8 ECE channels + 6 scalars
+    ///   + 6 actuator positions + 6 previous actions + 1 episode phase
+    static constexpr std::size_t kDefaultObservationSize = 8 * 2 + 8 + 6 + kActuatorCount * 2 + 1;
 
     /// Writes exactly observationSize() values.
     void observe(std::span<Real> out) const;

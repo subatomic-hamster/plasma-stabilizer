@@ -106,7 +106,19 @@ struct ActuatorLimits
     /// collapses to "turn everything on", and deposition radius stops mattering.
     Real maximumDrivenFraction{ 0.06 };
     /// Gaussian deposition width, r/a.
-    Real depositionWidth{ 0.05 };
+    Real depositionWidth{ 0.14 };
+
+    /// Steering limits of the launcher, r/a.
+    ///
+    /// The inner limit is a real constraint on where a gyrotron can be aimed,
+    /// and it also removes a second solution branch. Depositing deep in the core
+    /// stabilizes the mode too, but by globally reshaping q rather than by
+    /// acting on the island -- and a reward landscape with two disconnected
+    /// optima separated by a band of guaranteed disruption is one that Gaussian
+    /// exploration cannot cross. Measured: aiming at r/a = 0.23 or at 0.68 both
+    /// return about +345, and everything between them disrupts.
+    Real minimumDepositionRadius{ 0.42 };
+    Real maximumDepositionRadius{ 0.95 };
 
     /// Beam power multiplies the heating, and with it the fast-ion drive.
     Real minimumBeamPower{ 0.35 };

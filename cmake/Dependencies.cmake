@@ -25,23 +25,24 @@ add_subdirectory(${PLASMA_PARTICLE_SIM_DIR} ${CMAKE_BINARY_DIR}/particle-sim)
 # the in-repo PPO implementation, to check the environment against an
 # independently written learner.
 if(PLASMA_WITH_RLTOOLS)
+    # SOURCE_SUBDIR points at a directory that does not exist on purpose: it is
+    # the supported way to fetch a repository without running its CMakeLists.
+    # RLTools' own build pulls in tests, examples and optional backends that
+    # this project has no use for, and FetchContent_Populate -- the old way to
+    # say the same thing -- was removed in CMake 4.
     FetchContent_Declare(rl_tools
         GIT_REPOSITORY https://github.com/rl-tools/rl-tools.git
-        GIT_TAG        v2.0.1
-        GIT_SHALLOW    TRUE)
-
-    # Populate only: RLTools' own CMake pulls in tests, examples and optional
-    # backends that this project has no use for.
-    FetchContent_GetProperties(rl_tools)
-    if(NOT rl_tools_POPULATED)
-        FetchContent_Populate(rl_tools)
-    endif()
+        GIT_TAG        b32d9985c65a5e098a6bbf190fd994962d288b99
+        GIT_SHALLOW    FALSE
+        SOURCE_SUBDIR  cmake/not-a-real-directory)
+    FetchContent_MakeAvailable(rl_tools)
 
     add_library(rl_tools INTERFACE)
     target_include_directories(rl_tools SYSTEM INTERFACE ${rl_tools_SOURCE_DIR}/include)
     target_compile_definitions(rl_tools INTERFACE
         RL_TOOLS_DISABLE_TENSORBOARD
         RL_TOOLS_DISABLE_HDF5
-        RL_TOOLS_DISABLE_CLI11)
+        RL_TOOLS_DISABLE_CLI11
+        RL_TOOLS_BACKEND_DISABLE_BLAS)
     add_library(rl_tools::rl_tools ALIAS rl_tools)
 endif()

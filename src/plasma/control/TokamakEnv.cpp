@@ -1,6 +1,7 @@
 #include <plasma/control/TokamakEnv.h>
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 
 namespace plasma {
@@ -40,6 +41,14 @@ void TokamakEnv::configure(const TokamakEnvConfig& config)
     }
 
     reset(1);
+
+    // The RLTools backend hard-codes the observation dimension because its
+    // dispatch is static; if the diagnostic configuration changes, that constant
+    // has to change with it.
+    if (config.diagnostics.mirnovCoils == 8 && config.diagnostics.eceChannels == 8) {
+        assert(observationSize() == kDefaultObservationSize &&
+               "kDefaultObservationSize is out of date with the diagnostic layout");
+    }
 }
 
 void TokamakEnv::reset(std::uint64_t seed)
@@ -146,7 +155,7 @@ RewardTerms TokamakEnv::computeReward(bool disrupted) const
     // Instability, from ground truth rather than from the noisy diagnostics: the
     // reward is allowed privileged information, the observation is not.
     const Real island = widestIsland();
-    terms.tearing = -weights.tearing * std::min(island / m_config.disruptionIslandWidth, 1.5);
+    terms.tearing = -weights.tearing * std::min(island / m_config.tearingPenaltyScale, 1.5);
 
     const Real alfvenic = alfvenicAmplitude() / kAlfvenicReference;
     terms.alfvenic = -weights.alfvenic * std::min(alfvenic, 2.0);
@@ -166,7 +175,11 @@ RewardTerms TokamakEnv::computeReward(bool disrupted) const
                        static_cast<Real>(kActuatorCount);
 
     terms.survival = weights.survival;
-    terms.disruption = disrupted ? -weights.disruption : 0.0;
+
+    // Charged for the rest of the discharge that will now never happen, so that
+    // ending the episode early can never be worth more than surviving it badly.
+    const Real remaining = static_cast<Real>(std::max(0, m_config.maxSteps - m_step));
+    terms.disruption = disrupted ? -weights.disruption * remaining : 0.0;
 
     terms.total = terms.confinement + terms.tearing + terms.alfvenic + terms.smoothness +
                   terms.chatter + terms.saturation + terms.survival + terms.disruption;
@@ -185,9 +198,14 @@ StepResult TokamakEnv::step(std::span<const Real> action)
 
     m_actuators.drive(action, dt);
     for (std::size_t i = 0; i < kActuatorCount; ++i) {
-        const Real value = (i < action.size()) ? std::clamp(action[i], -1.0, 1.0) : 0.0;
-        m_actionVariance[i].update(value, dt);
-        m_previousAction[i] = value;
+        m_previousAction[i] = (i < action.size()) ? std::clamp(action[i], -1.0, 1.0) : 0.0;
+        // Chatter is measured on where the actuator actually went, not on what
+        // was commanded. During training the commanded action carries the
+        // policy's exploration noise, and charging the policy for exploring is
+        // a way of teaching it not to -- the slew-limited hardware position is
+        // the honest measure of whether the machine is being rattled.
+        const Actuator& channel = m_actuators.channel(static_cast<ActuatorChannel>(i));
+        m_actionVariance[i].update(channel.normalized() * 2.0 - 1.0, dt);
     }
 
     applyActuatorsToPlasma();
