@@ -1,4 +1,6 @@
 add_executable(plasma-train train.cpp)
+add_executable(plasma-evaluate evaluate.cpp)
+target_link_libraries(plasma-evaluate PRIVATE plasma::rl plasma::flags)
 target_link_libraries(plasma-train PRIVATE plasma::rl plasma::flags)
 
 if(PLASMA_BUILD_VIEWER)

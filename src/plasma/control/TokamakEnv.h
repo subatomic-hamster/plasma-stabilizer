@@ -55,7 +55,7 @@ struct RewardWeights
     /// Scaling by the steps remaining makes a disruption cost what it destroys,
     /// so surviving badly always beats not surviving. The value is set above the
     /// worst sustainable per-step loss for that reason.
-    Real disruption{ 3.5 };
+    Real disruption{ 6.0 };
 };
 
 /// Per-step breakdown, kept so training curves can show which objective a
