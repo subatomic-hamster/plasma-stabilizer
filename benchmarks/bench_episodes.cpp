@@ -31,23 +31,29 @@ TokamakEnvConfig referenceConfig()
 
 double episodesPerHour(TokamakEnv& env, int episodes, const std::vector<Real>& action,
                        const PpoAgent* agent, std::vector<Real>& observation,
-                       std::vector<Real>& scratchAction)
+                       std::vector<Real>& scratchAction, double* meanSteps = nullptr)
 {
     psim::Clock clock;
+    long long totalSteps = 0;
     for (int i = 0; i < episodes; ++i) {
         env.reset(4242 + static_cast<std::uint64_t>(i));
         for (int step = 0; step < env.config().maxSteps; ++step) {
-            const std::vector<Real>* chosen = &action;
+            // The policy's action is computed and then discarded on purpose.
+            // Stepping it instead would change where the episode ends, so the
+            // two rows would differ by trajectory length rather than by the
+            // cost of a decision -- and an untrained agent disrupts early,
+            // which makes inference look free and then some.
             if (agent != nullptr) {
                 env.observe(observation);
                 agent->actGreedy(observation, scratchAction);
-                chosen = &scratchAction;
             }
-            const StepResult result = env.step(*chosen);
+            const StepResult result = env.step(action);
+            ++totalSteps;
             if (result.terminated || result.truncated) break;
         }
     }
     const double seconds = clock.elapsed();
+    if (meanSteps != nullptr) *meanSteps = static_cast<double>(totalSteps) / episodes;
     return static_cast<double>(episodes) / seconds * 3600.0;
 }
 
@@ -77,17 +83,24 @@ int main(int argc, char** argv)
                 config.radialPoints,
                 static_cast<int>(config.controlPeriod / config.mhd.substep));
 
+    double fixedSteps  = 0;
+    double policySteps = 0;
+
     const double fixedRate = episodesPerHour(env, episodes, stabilizing, nullptr,
-                                             observation, scratchAction);
-    std::printf("%-34s %10.0f episodes/hour\n", "fixed action", fixedRate);
+                                             observation, scratchAction, &fixedSteps);
+    std::printf("%-34s %10.0f episodes/hour  (%.0f steps/episode)\n",
+                "fixed action", fixedRate, fixedSteps);
 
     PpoAgent agent;
     PpoConfig ppo;
     agent.configure(static_cast<int>(env.observationSize()),
                     static_cast<int>(TokamakEnv::actionSize()), ppo, 1);
     const double policyRate = episodesPerHour(env, episodes, stabilizing, &agent,
-                                              observation, scratchAction);
-    std::printf("%-34s %10.0f episodes/hour\n", "with policy inference", policyRate);
+                                              observation, scratchAction, &policySteps);
+    std::printf("%-34s %10.0f episodes/hour  (%.0f steps/episode)\n",
+                "with policy inference", policyRate, policySteps);
+    std::printf("%-34s %10.1f%%\n", "inference overhead",
+                (fixedRate / policyRate - 1.0) * 100.0);
 
     // Scaling with radial resolution, since that is the knob that trades
     // physics fidelity against throughput.

@@ -287,24 +287,44 @@ floor.
 ### Throughput
 
 ```
-10,500 simulated control episodes per hour, single-threaded
+fixed action                             3503 episodes/hour  (400 steps/episode)
+with policy inference                    3598 episodes/hour  (400 steps/episode)
+inference overhead                       -2.6%
 ```
 
 Each episode is 400 control steps of reduced MHD with three modes on a 192-point
-radial grid. The requirement was 100+ per hour.
+radial grid. The requirement was 100+ per hour; this is 35x that, single-threaded,
+while a training run had four cores busy.
+
+Both rows deliberately run the *same* trajectory — the benchmark computes the
+policy's action and then discards it, stepping the fixed action either way. An
+earlier version stepped the policy's action, and an untrained agent disrupts
+early, which made "with policy inference" come out 2.5x *faster* than no
+inference at all. A throughput number that improves when you add work is
+measuring episode length, not speed.
+
+With that fixed, the overhead is inside the run-to-run noise, which is what a
+17.5 us decision against a 2.57 ms control step should look like (0.7% expected).
+The MHD substeps are the whole cost; the policy is free.
+
+Radial resolution is the knob that trades fidelity for throughput:
+
+| grid points | 96 | 128 | 192 | 256 | 384 |
+|---|---:|---:|---:|---:|---:|
+| episodes/hour | 7707 | 5591 | 3667 | 2653 | 1797 |
 
 ### Control latency
 
 `plasma-evaluate` times exactly what a deployed controller runs — observation
 packing, normalization, forward pass — over every decision in the run. Measured
-over 2357 decisions:
+over 15,630 decisions:
 
 ```
-median 18.8 us, p99 51.3 us, worst 167.8 us
+median 17.5 us, p99 43.2 us, worst 154.6 us
 ```
 
-The control period is 950 us, so the worst decision uses 18% of the budget it
-actually has, and 0.34% of a 50 ms allowance. The margin comes from the model
+The control period is 950 us, so the worst decision uses 16% of the budget it
+actually has, and 0.31% of a 50 ms allowance. The margin comes from the model
 being small on purpose: 14,413 parameters across a 43-input, two-layer network.
 
 ### Controller performance
@@ -313,17 +333,36 @@ being small on purpose: 14,413 parameters across a 43-input, two-layer network.
 ./build/bin/plasma-evaluate --policy policy.bin --episodes 40
 ```
 
+40 held-out episodes, seeds 900000..900039:
+
 | controller | return | disruptions | mean island | confinement |
 |---|---:|---:|---:|---:|
-| passive (full beam, no current drive) | -579 | 60% | 0.430 | 1.39 |
-| best constant action | +322 | 0% | 0.014 | 0.76 |
-| learned policy | see evaluation output | | | |
+| passive (full beam, no current drive) | -590 +/- 122 | 78% | 0.462 | 1.40 |
+| best constant action | **+323 +/- 5** | **0%** | **0.014** | 0.76 |
+| learned policy (PPO, 115 updates) | +177 +/- 118 | 55% | 0.324 | 0.85 |
+
+**The learned policy does not beat the tuned constant baseline.** It clears the
+passive plasma by ~770 return and cuts the island roughly in half, but it
+disrupts 55% of discharges where the fixed action disrupts none, and its spread
+(+/- 118) is 24x the baseline's.
+
+The shape of the failure is the interesting part. The policy found a *higher
+confinement* operating point than the baseline — 0.85 against 0.76 — and cannot
+hold it. That is the multi-objective trade-off behaving exactly as posed: the
+reward pays for confinement, the beam power that buys confinement also drives the
+island, and the baseline's answer is to give up confinement for a discharge that
+never fails. The policy is trying to have both and losing the coin flip half the
+time. It is climbing — best evaluation improved monotonically from -1297 at
+update 1 to +212 at update 115, with the disruption rate falling 1.00 -> 0.40 —
+so this is an unfinished optimization, not a converged one.
 
 The "best constant action" bar is deliberately hard: current drive parked on the
 rational surface with the beam just below the Alfvénic threshold, found by
 sweeping the action space. Beating it requires reacting to the plasma rather than
 settling on a good average — the rational surface moves with the per-episode
-equilibrium randomization, so a fixed aim is never optimal for long.
+equilibrium randomization, so a fixed aim is never optimal for long. What the
+numbers say is that the reactive policy has not yet learned to be reliable enough
+to cash that advantage in.
 
 ---
 
